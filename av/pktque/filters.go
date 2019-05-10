@@ -16,16 +16,20 @@ type Filter interface {
 type Filters []Filter
 
 func (self Filters) ModifyPacket(pkt *av.Packet, streams []av.CodecData, videoidx int, audioidx int) (drop bool, err error) {
+	// 执行多个 filter
 	for _, filter := range self {
+		// 执行 filter 处理逻辑
 		if drop, err = filter.ModifyPacket(pkt, streams, videoidx, audioidx); err != nil {
 			return
 		}
+		// 是否应该丢弃
 		if drop {
 			return
 		}
 	}
 	return
 }
+
 
 // Wrap origin Demuxer and Filter into a new Demuxer, when read this Demuxer filters will be called.
 type FilterDemuxer struct {
@@ -38,9 +42,11 @@ type FilterDemuxer struct {
 
 func (self FilterDemuxer) ReadPacket() (pkt av.Packet, err error) {
 	if self.streams == nil {
+		// 获取当前 rtmp 流元数据
 		if self.streams, err = self.Demuxer.Streams(); err != nil {
 			return
 		}
+		// 设置音视频频道号
 		for i, stream := range self.streams {
 			if stream.Type().IsVideo() {
 				self.videoidx = i
@@ -51,13 +57,16 @@ func (self FilterDemuxer) ReadPacket() (pkt av.Packet, err error) {
 	}
 
 	for {
+		// 读取数据包
 		if pkt, err = self.Demuxer.ReadPacket(); err != nil {
 			return
 		}
+		// 执行 Filter 过滤逻辑
 		var drop bool
 		if drop, err = self.Filter.ModifyPacket(&pkt, self.streams, self.videoidx, self.audioidx); err != nil {
 			return
 		}
+		// 是否丢弃
 		if !drop {
 			break
 		}
@@ -66,19 +75,35 @@ func (self FilterDemuxer) ReadPacket() (pkt av.Packet, err error) {
 	return
 }
 
+
+
+
+
+
+/******* 下面定义了几个通用的 Filter 类 ***************/
+
+// 过滤非关键帧
 // Drop packets until first video key frame arrived.
 type WaitKeyFrame struct {
 	ok bool
 }
 
 func (self *WaitKeyFrame) ModifyPacket(pkt *av.Packet, streams []av.CodecData, videoidx int, audioidx int) (drop bool, err error) {
+	// 若 self.ok == false 且当前帧为视频关键帧，则置 self.ok 为 true。
 	if !self.ok && pkt.Idx == int8(videoidx) && pkt.IsKeyFrame {
 		self.ok = true
 	}
+	// 是否 drop 
 	drop = !self.ok
 	return
 }
 
+
+
+
+
+
+// 时间戳修正
 // Fix incorrect packet timestamps.
 type FixTime struct {
 	zerobase time.Duration
@@ -111,6 +136,8 @@ func (self *FixTime) ModifyPacket(pkt *av.Packet, streams []av.CodecData, videoi
 	return
 }
 
+
+// 
 // Drop incorrect packets to make A/V sync.
 type AVSync struct {
 	MaxTimeDiff time.Duration

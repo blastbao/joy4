@@ -21,13 +21,11 @@ type tStream struct {
 
 type Options struct {
 	// check if transcode is needed, and create the AudioDecoder and AudioEncoder.
-	FindAudioDecoderEncoder func(codec av.AudioCodecData, i int) (
-		need bool, dec av.AudioDecoder, enc av.AudioEncoder, err error,
-	)
+	FindAudioDecoderEncoder func(codec av.AudioCodecData, i int) (need bool, dec av.AudioDecoder, enc av.AudioEncoder, err error)
 }
 
 type Transcoder struct {
-	streams                 []*tStream
+	streams []*tStream
 }
 
 func NewTranscoder(streams []av.CodecData, options Options) (_self *Transcoder, err error) {
@@ -36,23 +34,31 @@ func NewTranscoder(streams []av.CodecData, options Options) (_self *Transcoder, 
 
 	for i, stream := range streams {
 		ts := &tStream{codec: stream}
+
+		// 对于音频
 		if stream.Type().IsAudio() {
 			if options.FindAudioDecoderEncoder != nil {
 				var ok bool
 				var enc av.AudioEncoder
 				var dec av.AudioDecoder
+				// 查找音频编解码器
 				ok, dec, enc, err = options.FindAudioDecoderEncoder(stream.(av.AudioCodecData), i)
 				if ok {
 					if err != nil {
 						return
 					}
+
 					ts.timeline = &pktque.Timeline{}
+					// 设置编码器
 					if ts.codec, err = enc.CodecData(); err != nil {
 						return
 					}
+					
 					ts.aencodec = ts.codec.(av.AudioCodecData)
 					ts.adecodec = stream.(av.AudioCodecData)
+					// 设置音频编码器 
 					ts.aenc = enc
+					// 设置音频解码器 
 					ts.adec = dec
 				}
 			}

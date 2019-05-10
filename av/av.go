@@ -97,10 +97,10 @@ const (
 
 	CH_MONO     = ChannelLayout(CH_FRONT_CENTER)
 	CH_STEREO   = ChannelLayout(CH_FRONT_LEFT | CH_FRONT_RIGHT)
-	CH_2_1      = ChannelLayout(CH_STEREO | CH_BACK_CENTER)
-	CH_2POINT1  = ChannelLayout(CH_STEREO | CH_LOW_FREQ)
-	CH_SURROUND = ChannelLayout(CH_STEREO | CH_FRONT_CENTER)
-	CH_3POINT1  = ChannelLayout(CH_SURROUND | CH_LOW_FREQ)
+	CH_2_1      = ChannelLayout(CH_STEREO     | CH_BACK_CENTER)
+	CH_2POINT1  = ChannelLayout(CH_STEREO     | CH_LOW_FREQ)
+	CH_SURROUND = ChannelLayout(CH_STEREO     | CH_FRONT_CENTER)
+	CH_3POINT1  = ChannelLayout(CH_SURROUND   | CH_LOW_FREQ)
 	// TODO: add all channel_layout in ffmpeg
 )
 
@@ -116,15 +116,15 @@ func (self ChannelLayout) Count() (n int) {
 type CodecType uint32
 
 var (
-	H264 = MakeVideoCodecType(avCodecTypeMagic + 1)
-	AAC       = MakeAudioCodecType(avCodecTypeMagic + 1)
-	PCM_MULAW = MakeAudioCodecType(avCodecTypeMagic + 2)
-	PCM_ALAW  = MakeAudioCodecType(avCodecTypeMagic + 3)
-	SPEEX = MakeAudioCodecType(avCodecTypeMagic + 4)
-	NELLYMOSER = MakeAudioCodecType(avCodecTypeMagic + 5)
+	H264 		= MakeVideoCodecType(avCodecTypeMagic + 1)
+	AAC       	= MakeAudioCodecType(avCodecTypeMagic + 1)
+	PCM_MULAW 	= MakeAudioCodecType(avCodecTypeMagic + 2)
+	PCM_ALAW 	= MakeAudioCodecType(avCodecTypeMagic + 3)
+	SPEEX	 	= MakeAudioCodecType(avCodecTypeMagic + 4)
+	NELLYMOSER 	= MakeAudioCodecType(avCodecTypeMagic + 5)
 )
 
-const codecTypeAudioBit = 0x1
+const codecTypeAudioBit  = 0x1
 const codecTypeOtherBits = 1
 
 func (self CodecType) String() string {
@@ -170,7 +170,7 @@ const avCodecTypeMagic = 233333
 // CodecData is some important bytes for initializing audio/video decoder,
 // can be converted to VideoCodecData or AudioCodecData using:
 //
-//     codecdata.(AudioCodecData) or codecdata.(VideoCodecData)
+//  codecdata.(AudioCodecData) or codecdata.(VideoCodecData)
 // 
 // for H264, CodecData is AVCDecoderConfigure bytes, includes SPS/PPS.
 type CodecData interface {
@@ -179,15 +179,15 @@ type CodecData interface {
 
 type VideoCodecData interface {
 	CodecData
-	Width() int // Video width
+	Width() int  // Video width
 	Height() int // Video height
 }
 
 type AudioCodecData interface {
 	CodecData
-	SampleFormat() SampleFormat // audio sample format
-	SampleRate() int // audio sample rate
-	ChannelLayout() ChannelLayout // audio channel layout
+	SampleFormat() SampleFormat 	// audio sample format
+	SampleRate() int 				// audio sample rate
+	ChannelLayout() ChannelLayout 	// audio channel layout
 	PacketDuration([]byte) (time.Duration, error) // get audio compressed packet duration
 }
 
@@ -228,22 +228,23 @@ type DemuxCloser interface {
 
 // Packet stores compressed audio/video data.
 type Packet struct {
-	IsKeyFrame      bool // video packet is key frame
-	Idx             int8 // stream index in container format
-	CompositionTime time.Duration // packet presentation time minus decode time for H264 B-Frame
-	Time time.Duration // packet decode time
-	Data            []byte // packet data
+	IsKeyFrame      bool 			// video packet is key frame
+	Idx             int8 			// stream index in container format
+	CompositionTime time.Duration 	// packet presentation time minus decode time for H264 B-Frame  --- PTS
+	Time time.Duration 				// packet decode time --- DTS 
+	Data            []byte 			// packet data
 }
 
 // Raw audio frame.
 type AudioFrame struct {
-	SampleFormat  SampleFormat // audio sample format, e.g: S16,FLTP,...
+	SampleFormat  SampleFormat 	// audio sample format, e.g: S16,FLTP,...
 	ChannelLayout ChannelLayout // audio channel layout, e.g: CH_MONO,CH_STEREO,...
-	SampleCount   int // sample count in this frame
-	SampleRate    int // sample rate
-	Data          [][]byte // data array for planar format len(Data) > 1
+	SampleCount   int 			// sample count in this frame
+	SampleRate    int 			// sample rate
+	Data          [][]byte 		// data array for planar format len(Data) > 1
 }
 
+// 音频帧的持续时间 duration 计算方法， AAC 一帧是 23 ms
 func (self AudioFrame) Duration() time.Duration {
 	return time.Second * time.Duration(self.SampleCount) / time.Duration(self.SampleRate)
 }
@@ -267,13 +268,17 @@ func (self AudioFrame) Slice(start int, end int) (out AudioFrame) {
 	if start > end {
 		panic(fmt.Sprintf("av: AudioFrame split failed start=%d end=%d invalid", start, end))
 	}
+
 	out = self
+
 	out.Data = append([][]byte(nil), out.Data...)
 	out.SampleCount = end - start
+
 	size := self.SampleFormat.BytesPerSample()
 	for i := range out.Data {
 		out.Data[i] = out.Data[i][start*size : end*size]
 	}
+
 	return
 }
 
@@ -291,22 +296,22 @@ func (self AudioFrame) Concat(in AudioFrame) (out AudioFrame) {
 // AudioEncoder can encode raw audio frame into compressed audio packets.
 // cgo/ffmpeg inplements AudioEncoder, using ffmpeg.NewAudioEncoder to create it.
 type AudioEncoder interface {
-	CodecData() (AudioCodecData, error) // encoder's codec data can put into container
-	Encode(AudioFrame) ([][]byte, error) // encode raw audio frame into compressed pakcet(s)
-	Close() // close encoder, free cgo contexts
-	SetSampleRate(int) (error) // set encoder sample rate
+	CodecData() (AudioCodecData, error) 	// encoder's codec data can put into container
+	Encode(AudioFrame) ([][]byte, error) 	// encode raw audio frame into compressed pakcet(s)
+	Close() 								// close encoder, free cgo contexts
+	SetSampleRate(int) (error) 				// set encoder sample rate
 	SetChannelLayout(ChannelLayout) (error) // set encoder channel layout
-	SetSampleFormat(SampleFormat) (error) // set encoder sample format
-	SetBitrate(int) (error) // set encoder bitrate
-	SetOption(string,interface{}) (error) // encoder setopt, in ffmpeg is av_opt_set_dict()
-	GetOption(string,interface{}) (error) // encoder getopt
+	SetSampleFormat(SampleFormat) (error) 	// set encoder sample format
+	SetBitrate(int) (error) 				// set encoder bitrate
+	SetOption(string,interface{}) (error) 	// encoder setopt, in ffmpeg is av_opt_set_dict()
+	GetOption(string,interface{}) (error) 	// encoder getopt
 }
 
 // AudioDecoder can decode compressed audio packets into raw audio frame.
 // use ffmpeg.NewAudioDecoder to create it.
 type AudioDecoder interface {
 	Decode([]byte) (bool, AudioFrame, error) // decode one compressed audio packet
-	Close() // close decode, free cgo contexts
+	Close() 								 // close decode, free cgo contexts
 }
 
 // AudioResampler can convert raw audio frames in different sample rate/format/channel layout.

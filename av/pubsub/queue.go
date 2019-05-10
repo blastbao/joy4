@@ -110,11 +110,6 @@ func (self *Queue) WritePacket(pkt av.Packet) (err error) {
 	return
 }
 
-
-
-
-
-
 type QueueCursor struct {
 	que    *Queue        // 指向底层 Queue 队列 
 	pos    pktque.BufPos // 读取 Queue 的位置下标

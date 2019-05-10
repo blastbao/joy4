@@ -770,7 +770,14 @@ func (self *Conn) connectPlay() (err error) {
 	return
 }
 
+
+
+
+
 func (self *Conn) ReadPacket() (pkt av.Packet, err error) {
+
+	// stage: stageCodecDataDone
+	// flags: prepareReading
 	if err = self.prepare(stageCodecDataDone, prepareReading); err != nil {
 		return
 	}
@@ -795,6 +802,7 @@ func (self *Conn) ReadPacket() (pkt av.Packet, err error) {
 	return
 }
 
+
 func (self *Conn) Prepare() (err error) {
 	return self.prepare(stageCommandDone, 0)
 }
@@ -802,6 +810,7 @@ func (self *Conn) Prepare() (err error) {
 func (self *Conn) prepare(stage int, flags int) (err error) {
 	for self.stage < stage {
 		switch self.stage {
+
 		case 0:
 			if self.isserver {
 				if err = self.handshakeServer(); err != nil {
