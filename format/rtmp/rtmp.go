@@ -23,11 +23,13 @@ import (
 var Debug bool
 
 func ParseURL(uri string) (u *url.URL, err error) {
+	// uri => u.host  + u.port 
 	if u, err = url.Parse(uri); err != nil {
 		return
 	}
+	// url => host + port 
 	if _, _, serr := net.SplitHostPort(u.Host); serr != nil {
-		u.Host += ":1935"
+		u.Host += ":1935" //default 1935 
 	}
 	return
 }
@@ -157,6 +159,8 @@ type Conn struct {
 	writeMaxChunkSize int
 	readMaxChunkSize  int
 	readAckSize       uint32
+
+	// 块流 Map
 	readcsmap         map[uint32]*chunkStream
 
 	isserver            bool
@@ -215,6 +219,8 @@ func NewConn(netconn net.Conn) *Conn {
 	return conn
 }
 
+
+
 type chunkStream struct {
 	timenow     uint32
 	timedelta   uint32
@@ -227,10 +233,14 @@ type chunkStream struct {
 	msgdata     []byte
 }
 
+
+// new 一个 chunk 接收数组
 func (self *chunkStream) Start() {
 	self.msgdataleft = self.msgdatalen
 	self.msgdata = make([]byte, self.msgdatalen)
 }
+
+
 
 const (
 	msgtypeidUserControl      = 4
@@ -238,12 +248,12 @@ const (
 	msgtypeidWindowAckSize    = 5
 	msgtypeidSetPeerBandwidth = 6
 	msgtypeidSetChunkSize     = 1
-	msgtypeidCommandMsgAMF0   = 20
-	msgtypeidCommandMsgAMF3   = 17
-	msgtypeidDataMsgAMF0      = 18
-	msgtypeidDataMsgAMF3      = 15
-	msgtypeidVideoMsg         = 9
-	msgtypeidAudioMsg         = 8
+	msgtypeidCommandMsgAMF0   = 20 //0x14 RTMP_PACKET_TYPE_INVOKE
+	msgtypeidCommandMsgAMF3   = 17 //0x11 RTMP_PACKET_TYPE_FLEX_MESSAGE 
+	msgtypeidDataMsgAMF0      = 18 //0x12 RTMP_PACKET_TYPE_INFO 
+	msgtypeidDataMsgAMF3      = 15 //0x0F RTMP_PACKET_TYPE_FLEX_STREAM_SEND
+	msgtypeidVideoMsg         = 9  //0x09 RTMP_PACKET_TYPE_VIDEO
+	msgtypeidAudioMsg         = 8  //0x08 RTMP_PACKET_TYPE_AUDIO
 )
 
 const (
@@ -270,9 +280,11 @@ func (self *Conn) Close() (err error) {
 
 func (self *Conn) pollCommand() (err error) {
 	for {
+		// 读取一个完整的 msg
 		if err = self.pollMsg(); err != nil {
 			return
 		}
+		// 如果是 Command msg，则返回，否则继续 for 循环
 		if self.gotcommand {
 			return
 		}
@@ -281,9 +293,11 @@ func (self *Conn) pollCommand() (err error) {
 
 func (self *Conn) pollAVTag() (tag flvio.Tag, err error) {
 	for {
+		// 读取一个完整的 msg，存储到 self.msgdata 中
 		if err = self.pollMsg(); err != nil {
 			return
 		}
+		// 如果是音视频 msg，则返回对应的 self.avtag 对象，其中包含完整帧数据，否则继续 for 循环
 		switch self.msgtypeid {
 		case msgtypeidVideoMsg, msgtypeidAudioMsg:
 			tag = self.avtag
@@ -298,9 +312,12 @@ func (self *Conn) pollMsg() (err error) {
 	self.datamsgvals = nil
 	self.avtag = flvio.Tag{}
 	for {
+		// 读取一个 chunk
 		if err = self.readChunk(); err != nil {
 			return
 		}
+		// 检查是否获得完整 msg，如果没有就继续循环 readChunk()，否则 retur。
+		// 读取到的完整 msg 数据存储到 self.msgdata 中，如果是音视频帧类型会转存到 self.avtag 中。
 		if self.gotmsg {
 			return
 		}
@@ -366,6 +383,8 @@ func (self *Conn) writeBasicConf() (err error) {
 	}
 	return
 }
+
+
 
 func (self *Conn) readConnect() (err error) {
 	var connectpath string
@@ -602,6 +621,8 @@ func (self *Conn) writeConnect(path string) (err error) {
 	if Debug {
 		fmt.Printf("rtmp: > connect('%s') host=%s\n", path, self.URL.Host)
 	}
+
+	// 
 	if err = self.writeCommandMsg(3, 0, "connect", 1,
 		flvio.AMFMap{
 			"app":           path,
@@ -621,10 +642,13 @@ func (self *Conn) writeConnect(path string) (err error) {
 		return
 	}
 
+
 	for {
+
 		if err = self.pollMsg(); err != nil {
 			return
 		}
+
 		if self.gotcommand {
 			// < _result("NetConnection.Connect.Success")
 			if self.commandname == "_result" {
@@ -861,7 +885,14 @@ func (self *Conn) Streams() (streams []av.CodecData, err error) {
 	return
 }
 
+
+
+
+
+
 func (self *Conn) WritePacket(pkt av.Packet) (err error) {
+
+
 	if err = self.prepare(stageCodecDataDone, prepareWriting); err != nil {
 		return
 	}
@@ -879,6 +910,9 @@ func (self *Conn) WritePacket(pkt av.Packet) (err error) {
 
 	return
 }
+
+
+
 
 func (self *Conn) WriteTrailer() (err error) {
 	if err = self.flushWrite(); err != nil {
@@ -983,6 +1017,7 @@ func (self *Conn) writeAMF0Msg(msgtypeid uint8, csid, msgsid uint32, args ...int
 	}
 
 	b := self.tmpwbuf(chunkHeaderLength + size)
+
 	n := self.fillChunkHeader(b, csid, 0, msgtypeid, msgsid, size)
 	for _, arg := range args {
 		n += flvio.FillAMF0Val(b[n:], arg)
@@ -991,6 +1026,8 @@ func (self *Conn) writeAMF0Msg(msgtypeid uint8, csid, msgsid uint32, args ...int
 	_, err = self.bufw.Write(b[:n])
 	return
 }
+
+
 
 func (self *Conn) writeAVTag(tag flvio.Tag, ts int32) (err error) {
 	var msgtypeid uint8
@@ -1032,6 +1069,9 @@ func (self *Conn) writeAVTag(tag flvio.Tag, ts int32) (err error) {
 	return
 }
 
+
+
+
 func (self *Conn) writeStreamBegin(msgsid uint32) (err error) {
 	b := self.tmpwbuf(chunkHeaderLength + 6)
 	n := self.fillChunkHeader(b, 2, 0, msgtypeidUserControl, 0, 6)
@@ -1046,18 +1086,30 @@ func (self *Conn) writeStreamBegin(msgsid uint32) (err error) {
 func (self *Conn) writeSetBufferLength(msgsid uint32, timestamp uint32) (err error) {
 	b := self.tmpwbuf(chunkHeaderLength + 10)
 	n := self.fillChunkHeader(b, 2, 0, msgtypeidUserControl, 0, 10)
+	// 2B
 	pio.PutU16BE(b[n:], eventtypeSetBufferLength)
 	n += 2
+	// 4B
 	pio.PutU32BE(b[n:], msgsid)
 	n += 4
+	// 4B
 	pio.PutU32BE(b[n:], timestamp)
 	n += 4
+	// 
 	_, err = self.bufw.Write(b[:n])
 	return
 }
 
 const chunkHeaderLength = 12
 const FlvTimestampMax = 0xFFFFFF
+
+
+
+
+
+
+
+
 
 func (self *Conn) fillChunkHeader(b []byte, csid uint32, timestamp int32, msgtypeid uint8, msgsid uint32, msgdatalen int) (n int) {
 	//  0                   1                   2                   3
@@ -1072,20 +1124,34 @@ func (self *Conn) fillChunkHeader(b []byte, csid uint32, timestamp int32, msgtyp
 	//
 	//       Figure 9 Chunk Message Header – Type 0
 
+
+	// n default equal zero 
+
+	// chunk basic header中的stream id字段，1B
 	b[n] = byte(csid) & 0x3f
 	n++
+
+	// 时间戳 3B
 	if uint32(timestamp) <= FlvTimestampMax {
 		pio.PutU24BE(b[n:], uint32(timestamp))
 	} else {
 		pio.PutU24BE(b[n:], FlvTimestampMax)
 	}
 	n += 3
+ 
+	// msg data len, 3B
 	pio.PutU24BE(b[n:], uint32(msgdatalen))
 	n += 3
+
+	// message type id, 1B
 	b[n] = msgtypeid
 	n++
+
+	// message stream id, 4B
 	pio.PutU32LE(b[n:], msgsid)
 	n += 4
+
+	// 扩展时间戳字段，4B
 	if uint32(timestamp) > FlvTimestampMax {
 		pio.PutU32BE(b[n:], uint32(timestamp))
 		n += 4
@@ -1098,6 +1164,12 @@ func (self *Conn) fillChunkHeader(b []byte, csid uint32, timestamp int32, msgtyp
 	return
 }
 
+
+
+
+
+
+
 func (self *Conn) flushWrite() (err error) {
 	if err = self.bufw.Flush(); err != nil {
 		return
@@ -1105,9 +1177,63 @@ func (self *Conn) flushWrite() (err error) {
 	return
 }
 
+
+
+/*
+RTMP协议封包由一个包头和一个包体组成，包头可以是4种长度的任意一种:12, 8, 4, 1 byte(s)。
+
+包头：
+	12 个字节的包头记录了：时间戳、Head_Type、AMFSize、AMFType、StreamID信息；
+	8  个字节的包头记录了：时间戳、Head_Type、AMFSize、AMFType；
+	4  个字节的包头记录了：时间戳、Head_Type；
+	1  个字节的包头记录了：Head_Type；
+
+
+完整的RTMP包头有12字节，由下面5个部分组成:
+	名称	       大小(Byte)	含义
+	Head_Type	  1	        包头
+	TIMER	      3	        时间戳
+	AMFSize	      3	        数据大小
+	AMFType	      1	        数据类型
+	StreamID	  4	        流ID
+
+
+Head_Type - 包头类型
+
+  Head_Type为RTMP包的第一字节，这个字节里面记录了包头类型和包的ChannelID。
+  Head_Type的前两个Bit决定了包头长度，可以用掩码0xC0进行"与"计算得到。
+  Head_Type的前两个Bit和包头长度对应关系：
+	Bits	HeaderLength
+	00		12 bytes
+	01		8  bytes
+	10		4  bytes
+	11		1  byte
+
+  Head_Type的后面6个Bit和StreamID决定了ChannelID。StreamID和ChannelID对应关系：StreamID=(ChannelID-4)/5+1
+	ChannelID	用途
+	02			Ping 和ByteRead通道
+	03			Invoke通道 我们的connect() publish()和自字写的NetConnection.Call() 数据都是在这个通道的
+	04			Audio和Vidio通道
+	05 06 07	服务器保留,经观察FMS2用这些Channel也用来发送音频或视频数据
+
+
+包体：
+   包体最大长度默认为128字节，通过chunkSize可改变包体最大长度，通常当一段AFM数据超过128字节后，
+   超过128的部分就放到了其他的RTMP封包中，这个包的包头为一个字节。
+ */
+
+// 消息在网上传输的时候要分割成块，一个消息可能被封装成多个块(Chunk)，只有当所有块读取完
+// 才处理这整个消息(message)，所以这里要判断接收到的块(Chunk)是否组成一个完整的消息，否则
+// 会继续读，直到得到一整个Message。
+
+
+// ReadPacket需要多次调用（每次讀取一個chunk），並配合 RTMPPacket_IsReady 這個巨集使用才能讀取一個完整的RTMPPacket。
+
 func (self *Conn) readChunk() (err error) {
 	b := self.readbuf
 	n := 0
+
+	//1、读取一个字节存入 b[0]，这个字节代表 chunk basic header（大部分情况下，chunk basic header只占用一个字节）
 	if _, err = io.ReadFull(self.bufr, b[:1]); err != nil {
 		return
 	}
@@ -1117,36 +1243,60 @@ func (self *Conn) readChunk() (err error) {
 	var msghdrtype uint8
 	var csid uint32
 
+	//2、解析chunk basic header的fmt字段（块类型）和stream id字段（块流ID），其中fmt字段占2bit，stream id字段是变长的
+	// 2.1 chunk basic header中的fmt字段，2bit
 	msghdrtype = header >> 6
-
+	// 2.2 chunk basic header中的stream id字段，6bit，取值范围0~63，其中0/1/2为保留类型
 	csid = uint32(header) & 0x3f
+
+	//3、计算调整stream id字段
+	//ChunkStreamID是变长类型，这里读取到它的高位第一字节：
+	//（1）如果第一字节的值为2~63，那么就是真实的块流ID
+	//（2）如果第一字节的值为0~2，那么需要扩展字节数目，从新解析出块流ID
+	//	 （2.1）0表示块流ID占2个字节：（64-319）
+	//	 （2.2）1表示块流ID占3个字节：（320-65599）
+	//	 （2.3）2被保留
 	switch csid {
-	default: // Chunk basic header 1
-	case 0: // Chunk basic header 2
+	case 0:
+		//两字节形式，还需再读入1个字节。
 		if _, err = io.ReadFull(self.bufr, b[:1]); err != nil {
 			return
 		}
 		n += 1
 		csid = uint32(b[0]) + 64
-	case 1: // Chunk basic header 3
+	case 1:
+		//三字节形式，还需再读入2个字节。
 		if _, err = io.ReadFull(self.bufr, b[:2]); err != nil {
 			return
 		}
 		n += 2
 		csid = uint32(pio.U16BE(b)) + 64
+	default: 
+		// Chunk basic header 1
 	}
 
+	// 获取 stream id 对应的 chunkStream
 	cs := self.readcsmap[csid]
+	// 保存 stream id 的 chunkStream 到 self.readcsmap 中 
 	if cs == nil {
 		cs = &chunkStream{}
 		self.readcsmap[csid] = cs
 	}
 
-	var timestamp uint32
 
+
+	// 4、根据 msghdrtype 字段计算 chunk basic header+ chunk Msg header 的长度（通过查表得到），下面是计算规则：
+	//  fmt=0，那么chunk Msg header长度是11
+	//  fmt=1，那么chunk Msg header长度是7
+	//  fmt=2，那么chunk Msg header长度是3
+	//  fmt=3，那么chunk Msg header长度是0
+
+	var timestamp uint32
 	switch msghdrtype {
+
+	// fmt=0，那么 chunk Msg header 长度是11B
 	case 0:
-		//  0                   1                   2                   3
+		//  0                 1                   2                   3
 		//  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
 		// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 		// |                   timestamp                   |message length |
@@ -1157,34 +1307,56 @@ func (self *Conn) readChunk() (err error) {
 		// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 		//
 		//       Figure 9 Chunk Message Header – Type 0
+
+
+		// 如果 cs.msgdataleft 不为 0 ，意味着 csid 上之前的 Chunk 数据还没有接受完毕，直接返回错误
 		if cs.msgdataleft != 0 {
 			err = fmt.Errorf("rtmp: chunk msgdataleft=%d invalid", cs.msgdataleft)
 			return
 		}
+
+		// Header 为 11B
 		h := b[:11]
 		if _, err = io.ReadFull(self.bufr, h); err != nil {
 			return
 		}
 		n += len(h)
+
+		// timestamp 时间戳字段, 3B
 		timestamp = pio.U24BE(h[0:3])
 		cs.msghdrtype = msghdrtype
-		cs.msgdatalen = pio.U24BE(h[3:6])
+		// message length, 3B, -------- 注意这个字段的值即为整个 AVPacket 的大小，是完整帧的大小，而不是一个 chunk 的大小。
+		cs.msgdatalen = pio.U24BE(h[3:6]) 
+		// message type id, 1B
 		cs.msgtypeid = h[6]
+		// message stream id, 4B
 		cs.msgsid = pio.U32LE(h[7:11])
+
+		// 如果时间戳字段等于0xffffff，那么表示存在Extend timestamp字段
 		if timestamp == 0xffffff {
+			// 从网络（读缓存）读取扩展时间戳字段 4B
 			if _, err = io.ReadFull(self.bufr, b[:4]); err != nil {
 				return
 			}
 			n += 4
+			// 转大端整数
 			timestamp = pio.U32BE(b)
+			// 设置扩展时间戳字段标识位为 True
 			cs.hastimeext = true
 		} else {
+			// 设置扩展时间戳字段标识位为 False
 			cs.hastimeext = false
 		}
+
+		// 设置当前帧时间戳
 		cs.timenow = timestamp
+
+		// 用 cs.msgdatalen 值来初始化设置 cs.msgdataleft，并 new 一个数组开始接收 chunk 数据
 		cs.Start()
 
+	// fmt=1，那么chunk Msg header长度是7
 	case 1:
+
 		//  0                   1                   2                   3
 		//  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
 		// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
@@ -1194,10 +1366,13 @@ func (self *Conn) readChunk() (err error) {
 		// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 		//
 		//       Figure 10 Chunk Message Header – Type 1
+
+
 		if cs.msgdataleft != 0 {
 			err = fmt.Errorf("rtmp: chunk msgdataleft=%d invalid", cs.msgdataleft)
 			return
 		}
+
 		h := b[:7]
 		if _, err = io.ReadFull(self.bufr, h); err != nil {
 			return
@@ -1219,6 +1394,8 @@ func (self *Conn) readChunk() (err error) {
 		}
 		cs.timedelta = timestamp
 		cs.timenow += timestamp
+
+		// 用 cs.msgdatalen 值来初始化设置 cs.msgdataleft，并 new 一个数组开始接收 chunk 数据
 		cs.Start()
 
 	case 2:
@@ -1252,9 +1429,13 @@ func (self *Conn) readChunk() (err error) {
 		}
 		cs.timedelta = timestamp
 		cs.timenow += timestamp
+
+		// 用 cs.msgdatalen 值来初始化设置 cs.msgdataleft，并 new 一个数组开始接收 chunk 数据		
 		cs.Start()
 
+	// fmt=3，那么chunk Msg header长度是0
 	case 3:
+
 		if cs.msgdataleft == 0 {
 			switch cs.msghdrtype {
 			case 0:
@@ -1274,24 +1455,42 @@ func (self *Conn) readChunk() (err error) {
 					n += 4
 					timestamp = pio.U32BE(b)
 				} else {
+					// 增量
 					timestamp = cs.timedelta
 				}
+				// 将当前绝对时间戳保存起来，供下一个包转换时间戳使用
+				// 绝对时间戳 = 上一次绝对时间戳 + 时间戳增量
 				cs.timenow += timestamp
 			}
+
+			// 用 cs.msgdatalen 值来初始化设置 cs.msgdataleft，并 new 一个数组开始接收 chunk 数据			
 			cs.Start()
 		}
+
 
 	default:
 		err = fmt.Errorf("rtmp: invalid chunk msg header type=%d", msghdrtype)
 		return
 	}
 
+
+	// ... 至此，读完了包头，开始读取包体
+
+
+	// 待读取的字节数，注意 chunk 大小默认为 128B，也即每次只读取 128B，不断重复读取直到收到完整的 AvPacket 为止 
 	size := int(cs.msgdataleft)
 	if size > self.readMaxChunkSize {
 		size = self.readMaxChunkSize
 	}
+
+	// 整个 chunk 总长度 - 待收取的字节数 = 当前写入起始偏移
 	off := cs.msgdatalen - cs.msgdataleft
 	buf := cs.msgdata[off : int(off)+size]
+	
+	// 读取 size 个字节（一般是128B）
+	// 1. 如果 self.bufr 是空，则返回 EOF 错误。
+    // 2. 如果 self.bufr 少于 len(buf) 个字节， 则返回 ErrUnexpectedEOF 错误，并返回读取的字节。
+    // 3. 其他情况，正常返回 len(buf) 个字节，错误是 nil 。
 	if _, err = io.ReadFull(self.bufr, buf); err != nil {
 		return
 	}
@@ -1299,21 +1498,24 @@ func (self *Conn) readChunk() (err error) {
 	cs.msgdataleft -= uint32(size)
 
 	if Debug {
-		fmt.Printf("rtmp: chunk msgsid=%d msgtypeid=%d msghdrtype=%d len=%d left=%d\n",
+		fmt.Printf("rtmp: chunk msgsid=%d msgtypeid=%d msghdrtype=%d len=%d left=%d\n", 
 			cs.msgsid, cs.msgtypeid, cs.msghdrtype, cs.msgdatalen, cs.msgdataleft)
 	}
 
+	// msgdataleft 为 0 标识着当前 Msg 已读取完毕，处理一下并返回
 	if cs.msgdataleft == 0 {
 		if Debug {
 			fmt.Println("rtmp: chunk data")
 			fmt.Print(hex.Dump(cs.msgdata))
 		}
 
+		// 处理完整的 Msg 
 		if err = self.handleMsg(cs.timenow, cs.msgsid, cs.msgtypeid, cs.msgdata); err != nil {
 			return
 		}
 	}
 
+	// 每收完一次 chunk 调用 Write ACK(n) 知会发送端，n 为本次读取的 chunk 的大小
 	self.ackn += uint32(n)
 	if self.readAckSize != 0 && self.ackn > self.readAckSize {
 		if err = self.writeAck(self.ackn); err != nil {
@@ -1322,26 +1524,35 @@ func (self *Conn) readChunk() (err error) {
 		self.ackn = 0
 	}
 
+	// 成功返回，err == nil，外层会控制循环调用本函数，知道收到完整的 msg 为止
 	return
 }
 
+// 
 func (self *Conn) handleCommandMsgAMF0(b []byte) (n int, err error) {
 	var name, transid, obj interface{}
 	var size int
 
+	// Command Name 
 	if name, size, err = flvio.ParseAMF0Val(b[n:]); err != nil {
 		return
 	}
 	n += size
+
+
+	// 获取 TransID
 	if transid, size, err = flvio.ParseAMF0Val(b[n:]); err != nil {
 		return
 	}
 	n += size
+
+	// 
 	if obj, size, err = flvio.ParseAMF0Val(b[n:]); err != nil {
 		return
 	}
 	n += size
 
+	// 
 	var ok bool
 	if self.commandname, ok = name.(string); !ok {
 		err = fmt.Errorf("rtmp: CommandMsgAMF0 command is not string")
@@ -1363,17 +1574,37 @@ func (self *Conn) handleCommandMsgAMF0(b []byte) (n int, err error) {
 		return
 	}
 
+	// True 
 	self.gotcommand = true
 	return
 }
+
+
 
 func (self *Conn) handleMsg(timestamp uint32, msgsid uint32, msgtypeid uint8, msgdata []byte) (err error) {
 	self.msgdata = msgdata
 	self.msgtypeid = msgtypeid
 	self.timestamp = timestamp
 
+	// const (
+	// 	msgtypeidUserControl      = 4
+	// 	msgtypeidAck              = 3
+	// 	msgtypeidWindowAckSize    = 5
+	// 	msgtypeidSetPeerBandwidth = 6
+	// 	msgtypeidSetChunkSize     = 1
+	// 	msgtypeidCommandMsgAMF0   = 20 //0x14 RTMP_PACKET_TYPE_INVOKE
+	// 	msgtypeidCommandMsgAMF3   = 17 //0x11 RTMP_PACKET_TYPE_FLEX_MESSAGE 
+	// 	msgtypeidDataMsgAMF0      = 18 //0x12 RTMP_PACKET_TYPE_INFO 
+	// 	msgtypeidDataMsgAMF3      = 15 //0x0F RTMP_PACKET_TYPE_FLEX_STREAM_SEND
+	// 	msgtypeidVideoMsg         = 9  //0x09 RTMP_PACKET_TYPE_VIDEO
+	// 	msgtypeidAudioMsg         = 8  //0x08 RTMP_PACKET_TYPE_AUDIO
+	// )
+
+
 	switch msgtypeid {
+
 	case msgtypeidCommandMsgAMF0:
+
 		if _, err = self.handleCommandMsgAMF0(msgdata); err != nil {
 			return
 		}
@@ -1395,6 +1626,7 @@ func (self *Conn) handleMsg(timestamp uint32, msgsid uint32, msgtypeid uint8, ms
 		}
 		self.eventtype = pio.U16BE(msgdata)
 
+	// 
 	case msgtypeidDataMsgAMF0:
 		b := msgdata
 		n := 0
@@ -1412,10 +1644,12 @@ func (self *Conn) handleMsg(timestamp uint32, msgsid uint32, msgtypeid uint8, ms
 			return
 		}
 
+	// 视频
 	case msgtypeidVideoMsg:
 		if len(msgdata) == 0 {
 			return
 		}
+		// 解析视频 FlvTag 
 		tag := flvio.Tag{Type: flvio.TAG_VIDEO}
 		var n int
 		if n, err = (&tag).ParseHeader(msgdata); err != nil {
@@ -1427,10 +1661,12 @@ func (self *Conn) handleMsg(timestamp uint32, msgsid uint32, msgtypeid uint8, ms
 		tag.Data = msgdata[n:]
 		self.avtag = tag
 
+	// 音频
 	case msgtypeidAudioMsg:
 		if len(msgdata) == 0 {
 			return
 		}
+		// 解析音频 FlvTag 
 		tag := flvio.Tag{Type: flvio.TAG_AUDIO}
 		var n int
 		if n, err = (&tag).ParseHeader(msgdata); err != nil {
@@ -1439,6 +1675,7 @@ func (self *Conn) handleMsg(timestamp uint32, msgsid uint32, msgtypeid uint8, ms
 		tag.Data = msgdata[n:]
 		self.avtag = tag
 
+	// 设置块大小
 	case msgtypeidSetChunkSize:
 		if len(msgdata) < 4 {
 			err = fmt.Errorf("rtmp: short packet of SetChunkSize")

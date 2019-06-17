@@ -52,13 +52,15 @@ func (self *Queue) SetMaxGopCount(n int) {
 // 设置 rtmp 流元数据
 func (self *Queue) WriteHeader(streams []av.CodecData) error {
 	self.lock.Lock()
+	//设置（更新）流媒体元数据
 	self.streams = streams
 	for i, stream := range streams {
-		// 设置 视频流索引 videoidx 
+		// 设置（更新）视频流索引 videoidx 
 		if stream.Type().IsVideo() {
 			self.videoidx = i
 		}
 	}
+	//广播通知订阅者有新消息到达
 	self.cond.Broadcast()
 	self.lock.Unlock()
 	return nil
@@ -72,7 +74,7 @@ func (self *Queue) WriteTrailer() error {
 func (self *Queue) Close() (err error) {
 	self.lock.Lock()
 
-	self.closed = true
+	self.closed = true//设置关闭标识
 	self.cond.Broadcast()
 
 	self.lock.Unlock()
@@ -83,20 +85,29 @@ func (self *Queue) Close() (err error) {
 func (self *Queue) WritePacket(pkt av.Packet) (err error) {
 	self.lock.Lock()
 
+	// 已关闭队列不许写入
+	if self.closed {
+		err = errors.New("queue is closed")
+		return
+	}
+
 	// pkt 入队
 	self.buf.Push(pkt)
 
-	// 若是视频帧、且是关键帧，则更新 GOP 计数
+	// 若当前 pkt 是视频关键帧，则更新当前已缓存的关键帧数目（也即GOP数目）
 	if pkt.Idx == int8(self.videoidx) && pkt.IsKeyFrame {
 		self.curgopcount++
 	}
 
 	// 如果当前缓存的 GOP 总数超过阈值，就 Pop 出冗余的视频帧
 	for self.curgopcount >= self.maxgopcount && self.buf.Count > 1 {
+		// 移除旧帧
 		pkt := self.buf.Pop()
+		// 如果被移除的是视频关键帧，更新当前已缓存的关键帧数目
 		if pkt.Idx == int8(self.videoidx) && pkt.IsKeyFrame {
 			self.curgopcount--
 		}
+		// 如果移除之后满足关键帧数目要求，就break，否则继续 for 循环删除
 		if self.curgopcount < self.maxgopcount {
 			break
 		}
